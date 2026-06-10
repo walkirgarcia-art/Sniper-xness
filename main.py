@@ -1,34 +1,25 @@
 import os
-import requests
 import time
+import threading
+import requests
 import yfinance as yf
-import pandas as pd
 from flask import Flask
-from threading import Thread
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator, ADXIndicator
 
+# Variables desde Render
 TOKEN = os.environ['TELEGRAM_BOT_TOKEN']
 CHAT_ID = os.environ['TELEGRAM_CHAT_ID']
-LINK_BROKER = "https://my.exness.com/webterminal"
 
+# Pares a monitorear - Exness
 PARES = [
-    # FOREX
-    "EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X", "USDCAD=X", "USDCHF=X", "NZDUSD=X",
-    "EURJPY=X", "GBPJPY=X", "EURGBP=X",
-    # ORO
-    "XAUUSD=X",
-    # CRYPTO
-    "BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD", "BNB-USD"
+    'EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'XAUUSD=X', 
+    'BTC-USD', 'ETH-USD'
 ]
 
-TEMPORALIDAD = "15m"
-ULTIMA_SEÑAL = {}
 app = Flask(__name__)
 
-def enviar_telegram(mensaje):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": mensaje, "parse_mode": "HTML", "disable_web_page_preview": True}
+def send_telegram(msg):
+    url = f'https://api.telegram.org/bot{TOKEN}/sendMessage'
+    data = {'chat_id': CHAT_ID, 'text': msg, 'parse_mode': 'Markdown'}
     try:
         requests.post(url, data=data, timeout=10)
     except Exception as e:
@@ -36,21 +27,54 @@ def enviar_telegram(mensaje):
 
 def analizar_par(simbolo):
     try:
-        df = yf.download(tickers=simbolo, period="5d", interval=TEMPORALIDAD, progress=False)
-        if len(df) < 100: 
-            return
+        df = yf.download(tickers=simbolo, period='1d', interval='15m', progress=False)
+        if len(df) < 20:
+            return None
             
-        df['ema50'] = EMAIndicator(df['Close'], 50).ema_indicator()
-        df['ema200'] = EMAIndicator(df['Close'], 200).ema_indicator()
-        df['rsi'] = RSIIndicator(df['Close'], 14).rsi()
-        df['adx'] = ADXIndicator(df['High'], df['Low'], df['Close'], 14).adx()
-        df['atr'] = (df['High'] - df['Low']).rolling(14).mean()
+        df['EMA9'] = df['Close'].ewm(span=9).mean()
+        df['EMA21'] = df['Close'].ewm(span=21).mean()
         
-        ult = df.iloc[-1]
-        ant = df.iloc[-2]
+        ultima = df.iloc[-1]
+        anterior = df.iloc[-2]
         
-        hay_tendencia = ult['adx'] > 25
-        tendencia_alcista = ult['Close'] > ult['ema200']
-        tendencia_bajista = ult['Close'] < ult['ema200']
+        # Cruce alcista
+        buy = anterior['EMA9'] < anterior['EMA21'] and ultima['EMA9'] > ultima['EMA21']
+        # Cruce bajista  
+        sell = anterior['EMA9'] > anterior['EMA21'] and ultima['EMA9'] < ultima['EMA21']
         
-        buy =
+        precio = round(ultima['Close'], 5)
+        nombre = simbolo.replace('=X', '').replace('-USD', '/USD')
+        
+        if buy:
+            return f"🟢 *COMPRA* {nombre}\nPrecio: {precio}\nCruce EMA9 > EMA21 M15"
+        elif sell:
+            return f"🔴 *VENTA* {nombre}\nPrecio: {precio}\nCruce EMA21 > EMA9 M15"
+        else:
+            return None
+            
+    except Exception as e:
+        print(f"Error analizando {simbolo}: {e}")
+        return None
+
+def sniper_loop():
+    send_telegram("✅ *Sniper Exness activado*\nM15 | Forex + Crypto + Oro\nRevisando cada 10 min")
+    while True:
+        for par in PARES:
+            senal = analizar_par(par)
+            if senal:
+                send_telegram(senal)
+            time.sleep(2)  # No saturar yfinance
+        time.sleep(600)  # 10 minutos
+
+@app.route('/')
+def home():
+    return "Sniper Exness Bot Running"
+
+if __name__ == '__main__':
+    # Arranca el sniper en segundo plano
+    hilo = threading.Thread(target=sniper_loop)
+    hilo.daemon = True
+    hilo.start()
+    # Arranca Flask para que Render no apague el servicio
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port)
