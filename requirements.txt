@@ -1,4 +1,5 @@
 flask
 python-telegram-bot==13.15
-requests
+requests==2.31.0
+urllib3==1.26.18
 standard-imghdr
