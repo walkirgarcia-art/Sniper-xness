@@ -1,5 +1,5 @@
-Flask==3.0.3
-requests==2.32.3
-yfinance==0.2.43
-pandas==2.2.2
-ta==0.11.0
+Flask
+requests
+yfinance
+pandas
+ta
