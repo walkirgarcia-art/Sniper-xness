@@ -1,5 +1,2 @@
-flask
 python-telegram-bot==13.15
-requests==2.31.0
-standard-imghdr
-setuptools
+urllib3==1.26.18
